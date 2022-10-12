@@ -1,0 +1,377 @@
+---
+title: "Practicum 3"
+author: "Maitri Shah"
+date: "8/10/2021"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Installing and loading all useful libraries
+
+```{r}
+#install.packages("caret")
+#install.packages("class")
+#install.packages("questionr")
+#install.packages("FNN")
+library(tidyverse)
+library(ggplot2)
+library(caret)
+library(class)
+library(psych)
+library(dplyr)
+library(lubridate)
+library(questionr)
+library(FNN)
+library(fastDummies)
+```
+
+Question 1 —(20 points) +10 optional points CRISP-DM: Data Understanding  •Loadthe NYC Green Taxi Trip Recordsdata directly from the URLinto a data frame or tibble. 
+
+```{r}
+#Loading data into a dataframe
+NYC_taxi <- read.csv("https://s3.amazonaws.com/nyc-tlc/trip+data/green_tripdata_2020-02.csv", header = TRUE)
+View(NYC_taxi)
+```
+
+Data exploration:explore the data to identify any patterns and analyze the relationships between the features and the target variable i.e. tip amount.  1) the distribution, 2)  the correlations 3) missing values and 4) outliers 
+
+```{r}
+
+#Viewing the data
+head(NYC_taxi)
+str(NYC_taxi)
+summary(NYC_taxi)
+colnames(NYC_taxi)
+
+# 1) Distribution
+
+#Convert store_and_fwd_flag to numeric for distribution and correlation
+NYC_taxi$store_and_fwd_flag <- ifelse(NYC_taxi$store_and_fwd_flag== "Y", 0, 1)
+
+#Clean the data for lpep_pickup_datetime and lpep_dropoff_datetime for distribution and correlation
+NYC_taxi$lpep_pickup_datetime <-  ymd_hms(NYC_taxi$lpep_pickup_datetime,tz=Sys.timezone())
+NYC_taxi$lpep_dropoff_datetime <-  ymd_hms(NYC_taxi$lpep_dropoff_datetime,tz=Sys.timezone())
+
+NYC_taxi <- NYC_taxi %>%
+mutate (pickup.date = (mday(lpep_dropoff_datetime))) %>%
+  mutate(pickup.month = month(lpep_dropoff_datetime)) %>%
+  mutate(pickup.hour= hour(lpep_dropoff_datetime)) %>%
+  mutate (drop.date = (mday(lpep_dropoff_datetime))) %>%
+  mutate(drop.month = month(lpep_dropoff_datetime)) %>%
+  mutate(drop.hour= hour(lpep_dropoff_datetime))
+
+#Only extracted date, month and hour from lpep_pickup_datetime and lpep_dropoff_datetime since the year is common to all and hours and seconds might not create a major difference
+head(NYC_taxi)
+
+#Creating histograms for distribution
+
+ggplot(data=NYC_taxi, aes(x = VendorID)) + geom_histogram()
+hist(NYC_taxi$VendorID,main = 'Distribution of VendorID')
+hist(NYC_taxi$store_and_fwd_flag)
+hist(NYC_taxi$RatecodeID)
+hist(NYC_taxi$PULocationID)
+hist(NYC_taxi$DOLocationID)
+hist(NYC_taxi$passenger_count)
+hist(NYC_taxi$trip_distance)
+hist(NYC_taxi$fare_amount)
+hist(NYC_taxi$extra)
+hist(NYC_taxi$mta_tax)
+hist(NYC_taxi$tip_amount)
+hist(NYC_taxi$tolls_amount)
+hist(NYC_taxi$improvement_surcharge)
+hist(NYC_taxi$payment_type)
+hist(NYC_taxi$trip_type)
+hist(NYC_taxi$congestion_surcharge)
+```
+**Comments- The following columns are right skewed:RatecodeID, passenger_count, trip_distance, fare_amount, extra, tip_amount,  tolls_amount, trip_type and congestion_surcharge. The left skewed columns are: VendorID, store_and_fwd_flag, mta_tax, improvement_surcharge, PULocationID is bimodal and left skewed, payment_type is bimodal and right skewed, DOLocationID is multimodal**. 
+
+
+```{r}
+#2) Corelation
+
+cor_model <- cor(NYC_taxi[c("VendorID", "pickup.date", "pickup.month",  "pickup.hour", "drop.date", "drop.month", "drop.hour", "store_and_fwd_flag", "RatecodeID", "PULocationID", "DOLocationID", "passenger_count", "trip_distance", "fare_amount", "extra", "mta_tax", "tip_amount", "tolls_amount", "ehail_fee", "improvement_surcharge", "total_amount", "payment_type", "trip_type", "congestion_surcharge")])
+
+#Using everything
+corr.m <- cor(NYC_taxi[c("VendorID", "pickup.date", "pickup.month",  "pickup.hour", "drop.date", "drop.month", "drop.hour", "store_and_fwd_flag", "RatecodeID", "PULocationID", "DOLocationID", "passenger_count", "trip_distance", "fare_amount", "extra", "mta_tax", "tip_amount", "tolls_amount", "ehail_fee", "improvement_surcharge", "total_amount", "payment_type", "trip_type", "congestion_surcharge")], use= "everything")
+
+#Using pairwise
+corr.pairwise <- cor(NYC_taxi[c("VendorID", "pickup.date", "pickup.month",  "pickup.hour", "drop.date", "drop.month", "drop.hour", "store_and_fwd_flag", "RatecodeID", "PULocationID", "DOLocationID", "passenger_count", "trip_distance", "fare_amount", "extra", "mta_tax", "tip_amount", "tolls_amount", "ehail_fee", "improvement_surcharge", "total_amount", "payment_type", "trip_type", "congestion_surcharge")], use= "pairwise.complete.obs")
+```
+
+**Comments- when we select the columns as it is, a number of correlations show NA due to missing values in the data frame. When we select use= everything in corr.m, there is an improvemen as NAs will propagate conceptually, i.e., a resulting value will be NA whenever one of its contributing observations is NA. Multicollinearity- pick up month and drop month, pickup date & dropdate, pick up hour & drop hour present multicollinearity so we can remove one from each pair.Other columns with very low correlation are pickup.date, pickup.month,  PULocationID, DOLocationID, passenger_count. If we consider corr.pairwise, trip distance has a low correlation**
+
+```{r}
+# 3) Missing value
+
+freq.na(NYC_taxi)
+
+# 4) Outliers
+boxplot(NYC_taxi$passenger_count)
+boxplot(NYC_taxi$trip_distance)
+boxplot(NYC_taxi$fare_amount)
+boxplot(NYC_taxi$extra)
+boxplot(NYC_taxi$mta_tax)
+boxplot(NYC_taxi$tip_amount)
+boxplot(NYC_taxi$tolls_amount)
+boxplot(NYC_taxi$improvement_surcharge)
+boxplot(NYC_taxi$total_amount)
+```
+**Comments- 20% of the values are missing in a few columns and the ehail fee column is completely empty. On careful observation a number of rows (~80,000) have more than one column as NA. The outliers are shown using boxplots**
+
+```{r}
+
+# Feature selection: selecting features based on p values
+
+model <- lm(tip_amount ~ VendorID+ pickup.date+ pickup.month+ pickup.hour+ drop.date+ drop.month+ drop.hour+ store_and_fwd_flag+ RatecodeID+ PULocationID+ DOLocationID+ passenger_count+ trip_distance+ fare_amount+ extra+ mta_tax+ tolls_amount+ improvement_surcharge+ total_amount+ payment_type+ trip_type+ congestion_surcharge, data = NYC_taxi )
+summary(model)
+
+#Removing non-significant columns drop.date, drop.month, drop.hour as they have a higher p value
+model1 <- lm(tip_amount ~ VendorID+ pickup.date+ pickup.month+ pickup.hour+ store_and_fwd_flag+ RatecodeID+ PULocationID+ DOLocationID+ passenger_count+ trip_distance+ fare_amount+ extra+ mta_tax+ tolls_amount+ improvement_surcharge+ total_amount+ payment_type+ trip_type+ congestion_surcharge, data = NYC_taxi)
+summary(model1) # No change in adjusted R value
+
+#Removing non-significant columns trip_distance and PULocationID as they have a higher p value
+model2 <- lm(tip_amount ~ VendorID+ pickup.date+ pickup.month+ pickup.hour+ store_and_fwd_flag+ RatecodeID+ DOLocationID+ passenger_count+ fare_amount+ extra+ mta_tax+ tolls_amount+ improvement_surcharge+ total_amount+ payment_type+ trip_type+ congestion_surcharge, data = NYC_taxi)
+summary(model2) # No change in adjusted R value
+
+#Removing non-significant columns DOLocationID and store_and_fwd_flag as they have a higher p value
+model3 <- lm(tip_amount ~ VendorID+ pickup.date+ pickup.month+ pickup.hour+ RatecodeID+ passenger_count+ fare_amount+ extra+ mta_tax+ tolls_amount+ improvement_surcharge+ total_amount+ payment_type+ trip_type+ congestion_surcharge, data = NYC_taxi)
+summary(model3) # No change in adjusted R value
+
+#Removing non-significant columns RatecodeID and passenger_count as they have a higher p value
+model4 <- lm(tip_amount ~ VendorID+ pickup.date+ pickup.month+ pickup.hour+ fare_amount+ extra+ mta_tax+ tolls_amount+ improvement_surcharge+ total_amount+ payment_type+ trip_type+ congestion_surcharge, data = NYC_taxi)
+summary(model4) # No change in adjusted R value
+```
+
+**The feature selection from the final model includes the following variables: VendorID, pickup.date, pickup.month, pickup.hour, fare_amount, extra, mta_tax, tolls_amount, improvement_surcharge, total_amount, payment_type, trip_type and congestion_surcharge **
+
+```{r}
+#Feature engineering- The idea is to create a new feature to divide the days into Weekdays (Mon:Thu) and weekends(Fri:Sunday). We have selected Friday in weekend since it is the last day of weekdays and begining of the week and majority of trips have been on Fridays too.
+
+NYC_taxi <- NYC_taxi %>%
+  mutate(pickup.week= wday(lpep_pickup_datetime, label = TRUE))
+
+NYC_taxi$pickup.week <- ifelse(NYC_taxi$pickup.week %in% c("Mon", "Tue", "Wed", "Thu"), 0, 1)
+NYC_taxi %>% count(pickup.week)
+
+#Line graph
+ggplot(data= NYC_taxi, aes(x= pickup.week, y= tip_amount)) + geom_line()
+
+#It can be clearly seen that there is a big difference in tip amount for weekends than weekdays and this might affect prediction. Thus the new variable is worth considering
+
+#2nd feature engineering: The pick up hour column has been engineered into morning and evening. Time between 6 hours to 17 hours has been considered morning with a code of 0 and hours 18 to 23 are coded 1 depicting night 
+
+NYC_taxi %>% count(pickup.hour)
+
+NYC_taxi$pickup.hour <- ifelse(NYC_taxi$pickup.hour %in% c("18", "19", "20", "21", "22", "23", "0", "1", "2", "3", "4", "5"), 1, 0)
+ggplot(data= NYC_taxi, aes(x= pickup.hour, y= tip_amount)) + geom_line()
+
+#Since the line graph shows tips to be more for code 0, i.e. morning time, we will include this in the final features
+```
+**Final features selected: VendorID, pickup.date, pickup.month, pickup.hour, fare_amount, extra, mta_tax, tolls_amount, improvement_surcharge, total_amount, payment_type, trip_type, congestion_surcharge. We also selected pickup.week and pickup.hour from feature engineering. Some changes: It was seen from the correlation that pick up date and month have very low correlation. Moreover, the pick up month is February throughout, so it cannot be a useful parameter for prediction. Moreover, pickup date are also dates of only February and they will not be a good variable foe future selections.**
+
+**Thus, our final features are as follows: VendorID, fare_amount, extra, mta_tax, tolls_amount, improvement_surcharge, total_amount, payment_type, trip_type, congestion_surcharge, pickup week and pickup hour**
+
+Question 2 
+**Preprocess the data: handle missing data and outliers, perform any suitable data transformation steps, etc. Also, ensure that you filter the data. The goal is to predict the tip amount, therefore you need to ensure that you extract the data that contains this information**
+```{r}
+#  handle missing data
+
+#Removing the ehail_fee column as it is empty
+NYC_taxi <- NYC_taxi[ , -15]
+
+#Since the variable comp has all complete cases and the ~80,000 rows have multiple missing rows, they can be removed.
+NYC_taxi <- NYC_taxi[complete.cases(NYC_taxi), ] #All rows that are incomplete
+# Removing Outliers
+o1 <- boxplot(NYC_taxi$passenger_count,plot=FALSE)$out
+o2 <- boxplot(NYC_taxi$trip_distance,plot=FALSE)$out
+o3 <- boxplot(NYC_taxi$fare_amount,plot=FALSE)$out
+o4 <- boxplot(NYC_taxi$extra,plot=FALSE)$out
+o5 <- boxplot(NYC_taxi$mta_tax,plot=FALSE)$out
+o6 <- boxplot(NYC_taxi$tip_amount,plot=FALSE)$out
+o7 <- boxplot(NYC_taxi$tolls_amount,plot=FALSE)$out
+o8 <- boxplot(NYC_taxi$improvement_surcharge,plot=FALSE)$out
+o9 <- boxplot(NYC_taxi$total_amount,plot=FALSE)$out
+# Removing outliers
+NYC_taxi <- NYC_taxi[-which(NYC_taxi$passenger_count %in% o1),]
+NYC_taxi <- NYC_taxi[-which(NYC_taxi$trip_distance %in% o2),]
+NYC_taxi <- NYC_taxi[-which(NYC_taxi$fare_amount %in% o3),]
+NYC_taxi <- NYC_taxi[-which(NYC_taxi$extra %in% o4),]
+NYC_taxi <- NYC_taxi[-which(NYC_taxi$mta_tax %in% o5),]
+NYC_taxi <- NYC_taxi[-which(NYC_taxi$tip_amount %in% o6),]
+NYC_taxi <- NYC_taxi[-which(NYC_taxi$tolls_amount %in% o7),]
+NYC_taxi <- NYC_taxi[-which(NYC_taxi$improvement_surcharge %in% o8),]
+NYC_taxi <- NYC_taxi[-which(NYC_taxi$total_amount %in% o9),]
+head(NYC_taxi)
+
+#Data transformation. A few transformation steps were done in Q1
+
+#Filter data. We will first filter out data only for the month of Feb since that is the objective and then We will select only the variables we selected in the feature selection phase
+
+NYC_taxi <- NYC_taxi %>% filter(pickup.month== "2")
+
+NYC_taxi_df <- NYC_taxi %>% select(VendorID, pickup.hour, fare_amount, extra, mta_tax, tip_amount, tolls_amount, improvement_surcharge, total_amount, payment_type, trip_type, congestion_surcharge, pickup.week)
+
+```
+
+**Normalize the data**
+```{r}
+nor1 <- function(x) {
+return ((x - min(x)) / (max(x) - min(x)))
+}
+#Min max normalization
+nor2 <- function(x) {
+   return(ifelse(min(x) < max(x), (x - min(x)) / (max(x) - min(x)),x))
+ }
+
+
+NYC_taxi_df$fare_amount <- nor1(NYC_taxi_df$fare_amount) 
+NYC_taxi_df$extra <- nor1(NYC_taxi_df$extra)
+NYC_taxi_df$total_amount <- nor1(NYC_taxi_df$total_amount)
+NYC_taxi_df$congestion_surcharge <- nor1(NYC_taxi_df$congestion_surcharge)
+
+# To normalize the constant columns 
+NYC_taxi_df$mta_tax <- nor2(NYC_taxi_df$mta_tax)
+NYC_taxi_df$tolls_amount <- nor2(NYC_taxi_df$tolls_amount) 
+NYC_taxi_df$improvement_surcharge <- nor2(NYC_taxi_df$improvement_surcharge)
+
+
+head(NYC_taxi_df)
+```
+**Encode the data- the categorical variables (payment_type, trip_type) are already encoded.**
+```{r}
+
+#VendorID change to 0 and 1
+
+NYC_taxi_df$VendorID <- ifelse(NYC_taxi_df$VendorID== "1", 0, 1)
+
+#trip_type change to 0 and 1
+NYC_taxi_df$trip_type <- ifelse(NYC_taxi_df$trip_type== "1", 0, 1)
+
+summary(NYC_taxi_df)
+
+#Dummy coding for payment type
+
+NYC_taxi_df <- dummy_cols(NYC_taxi_df, select_columns = 'payment_type')
+
+NYC_taxi_df <- dummy_cols(NYC_taxi_df, select_columns = 'payment_type', remove_first_dummy = TRUE)
+
+
+payment_type <- as.data.frame(dummy.code(NYC_taxi_df$payment_type))
+payment_type <- rename(payment_type, 
+                       p1 = 1, p2 = 2, p3 = 3, p4 = 4, p5 = 5)
+# Combine new dummy variables with original data set.
+NYC_taxi_df <- cbind(NYC_taxi_df, payment_type)
+# Remove original variables that had to be dummy coded.
+NYC_taxi_df <- NYC_taxi_df %>% select(-one_of("payment_type"))
+
+```
+
+**Prepare the data for modeling- making an 80-20 split following the pareto principal. Also, the training data if taken small, there can be greater variance**
+```{r}
+set.seed(123)
+split <- sort(sample(nrow(NYC_taxi_df), nrow(NYC_taxi_df)*0.8))
+data_train_NYCtaxi <- NYC_taxi_df[split,]
+dim(data_train_NYCtaxi)
+data_test_NYCtaxi <- NYC_taxi_df[-split,]
+dim(data_test_NYCtaxi)
+```
+Question 3
+**In this step you will develop the k-nn regression model. Create a function with the following name and arguments: knn.predict(data_train, data_test, k)**
+**Implement the k-nn algorithm and use it to predict the tip amount for each observation in the test set i.e. data_test.**  
+**Calculate the mean squared error (MSE) between the predictions from the k-nn model and the actual tip amount in the test set.**
+**The knn-predict()function should return the MSE.**
+```{r}
+ knn.predict <- function(data_train, data_test, k) 
+{
+    #extract 6th column from the dataset because it will be used as 'cl' argument in knn function.
+    NYC_train_tip <- NYC_taxi_df[split,6]
+    #extract 6th column from the dataset to measure the MSE
+    NYC_test_tip <- NYC_taxi_df[-split,6]
+    #run KNN function
+    knn_reg_result <- knn.reg(data_train,data_test, NYC_train_tip, k=k)
+    #MSE calculation 
+    MSE <-mean((NYC_test_tip - knn_reg_result$pred)^2)
+    cat("The MSE for k =", k, "is", MSE, '\n')
+    return(MSE)
+ }
+n = nrow(data_train_NYCtaxi)
+k_value = round(sqrt(n))
+k_value
+knn_pred_fun <-knn.predict(data_train_NYCtaxi, data_test_NYCtaxi, 430)
+```
+
+Question 4
+**Determine the best value of k and visualize the MSE. This step requires selecting different values of k and evaluating which produced the lowest MSE. At a minimum, ensure that you perform the following:**  
+**Provide at least 20 different values of k to the knn.predict()function (along with the training set and the test set).  Tip: use a loop! Use a loop to call knn.predict()20 times and in each iteration of the loop, provide a different value of k to knn.predict(). Ensure that you save the MSE that’s returned.** 
+**Create a line chart and plot each value of k on the x-axis and the corresponding MSE on the y-axis. Explain the chart and determine which value of k is more suitable and why.**  
+**What are your thoughts on the model that you developed and the accuracy of its predictions? Would you advocate for its use to predict the tip amount of future trips? Explain your answer.** 
+```{r}
+mse_val <- 0
+for (i in seq(320, 520, 20)) #declaring initial value of k 
+   {
+    k_rag <- knn.predict(data_train_NYCtaxi, data_test_NYCtaxi, k=i)
+    mse_val[i] <- k_rag 
+    k=i
+    cat('k =', k, ' and MSR =', mse_val[i],'\n')
+}
+plot(mse_val, type = "l", xlab = "k-value",ylim = c(0,2), ylab = "MSE", xlim = c(300,550), main = "Line graph of K-vale vs MSE")
+```
+
+**Question 5** —(10 optional/bonus points) 
+2) optimize the k-nn model and evaluate the effect of the percentage split, between the training and test set, on the MSE. 
+Evaluate the effect of the percentage split for the training and test sets and determine if a different split ratio improves your model’s ability to make better predictions. 
+
+```{r}
+# 1 Train:67%, Test:33%
+set.seed(123)
+split1 <- sort(sample(nrow(NYC_taxi_df), nrow(NYC_taxi_df)*0.67))
+training1 <- NYC_taxi_df[split1,]
+test1 <- NYC_taxi_df[-split1,]
+k1 <- round(sqrt(nrow(training1)))
+k1
+knn.predict1 <- function(data_train, data_test, k) 
+{
+    #extract 6th column from the dataset because it will be used as 'cl' argument in knn function.
+    NYC_train_tip1 <- NYC_taxi_df[split1,6]
+    #extract 6th column from the dataset to measure the MSE
+    NYC_test_tip1 <- NYC_taxi_df[-split1,6]
+    #run KNN function
+    knn_reg_result <- knn.reg(data_train,data_test, NYC_train_tip1, k=k1)
+    #MSE calculation 
+    MSE1 <-mean((NYC_test_tip1 - knn_reg_result$pred)^2)
+    cat("The MSE for k =", k, "is", MSE, '\n')
+    return(MSE1)
+ }
+knn_pred1 <-knn.predict(training1, test1, k1)
+```
+
+```{r}
+# we have considered 70:30 split 
+set.seed(123)
+split <- sort(sample(nrow(NYC_taxi_df), nrow(NYC_taxi_df)*0.7))
+data_train_NYCtaxi_newsplit <- NYC_taxi_df[split,]
+dim(data_train_NYCtaxi_newsplit)
+data_test_NYCtaxi_newsplit<- NYC_taxi_df[-split,]
+dim(data_test_NYCtaxi_newsplit)
+
+knn.predict <- function(data_train, data_test, k) 
+{
+    #extract 6th column from the dataset because it will be used as 'cl' argument in knn function.
+    NYC_train_tip <- NYC_taxi_df[split,6]
+    #extract 6th column from the dataset to measure the MSE
+    NYC_test_tip <- NYC_taxi_df[-split,6]
+    #run KNN function
+    knn_reg_result <- knn.reg(data_train,data_test, NYC_train_tip, k=k)
+    #MSE calculation 
+    MSE <-mean((NYC_test_tip - knn_reg_result$pred)^2)
+    cat("The MSE for k =", k, "is", MSE, '\n')
+    return(MSE)
+ }
+
+knn_pred_fun <-knn.predict(data_train_NYCtaxi, data_test_NYCtaxi, 401)
+```
